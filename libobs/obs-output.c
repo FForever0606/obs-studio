@@ -18,11 +18,17 @@
 #include <inttypes.h>
 #include "util/platform.h"
 #include "util/util_uint64.h"
+#include "graphics/math-extra.h"
 #include "obs.h"
 #include "obs-internal.h"
 
 #include <caption/caption.h>
 #include <caption/mpeg.h>
+
+#define get_weak(output) ((obs_weak_output_t *)output->context.control)
+
+#define RECONNECT_RETRY_MAX_MSEC (15 * 60 * 1000)
+#define RECONNECT_RETRY_BASE_EXP 1.5f
 
 static inline bool active(const struct obs_output *output)
 {
@@ -143,11 +149,12 @@ obs_output_t *obs_output_create(const char *id, const char *name,
 
 	output->reconnect_retry_sec = 2;
 	output->reconnect_retry_max = 20;
+	output->reconnect_retry_exp =
+		RECONNECT_RETRY_BASE_EXP + (rand_float(0) * 0.05f);
 	output->valid = true;
 
-	output->control = bzalloc(sizeof(obs_weak_output_t));
-	output->control->output = output;
-
+	obs_context_init_control(&output->context, output,
+				 (obs_destroy_cb)obs_output_destroy);
 	obs_context_data_insert(&output->context, &obs->data.outputs_mutex,
 				&obs->data.first_output);
 
@@ -1222,7 +1229,7 @@ static bool add_caption(struct obs_output *output, struct encoder_packet *out)
 	sei_init(&sei, 0.0);
 
 	da_init(out_data);
-	da_push_back_array(out_data, &ref, sizeof(ref));
+	da_push_back_array(out_data, (uint8_t *)&ref, sizeof(ref));
 	da_push_back_array(out_data, out->data, out->size);
 
 	if (output->caption_data.size > 0) {
@@ -1967,7 +1974,7 @@ static inline void signal_reconnect(struct obs_output *output)
 
 	calldata_init_fixed(&params, stack, sizeof(stack));
 	calldata_set_int(&params, "timeout_sec",
-			 output->reconnect_retry_cur_sec);
+			 output->reconnect_retry_cur_msec / 1000);
 	calldata_set_ptr(&params, "output", output);
 	signal_handler_signal(output->context.signals, "reconnect", &params);
 }
@@ -1982,7 +1989,8 @@ static inline void signal_stop(struct obs_output *output)
 	struct calldata params;
 
 	calldata_init(&params);
-	calldata_set_string(&params, "last_error", output->last_error_message);
+	calldata_set_string(&params, "last_error",
+			    obs_output_get_last_error(output));
 	calldata_set_int(&params, "code", output->stop_code);
 	calldata_set_ptr(&params, "output", output);
 
@@ -2349,11 +2357,11 @@ void obs_output_end_data_capture(obs_output_t *output)
 static void *reconnect_thread(void *param)
 {
 	struct obs_output *output = param;
-	unsigned long ms = output->reconnect_retry_cur_sec * 1000;
 
 	output->reconnect_thread_active = true;
 
-	if (os_event_timedwait(output->reconnect_stop_event, ms) == ETIMEDOUT)
+	if (os_event_timedwait(output->reconnect_stop_event,
+			       output->reconnect_retry_cur_msec) == ETIMEDOUT)
 		obs_output_actual_start(output);
 
 	if (os_event_try(output->reconnect_stop_event) == EAGAIN)
@@ -2365,14 +2373,13 @@ static void *reconnect_thread(void *param)
 	return NULL;
 }
 
-#define MAX_RETRY_SEC (15 * 60)
-
 static void output_reconnect(struct obs_output *output)
 {
 	int ret;
 
 	if (!reconnecting(output)) {
-		output->reconnect_retry_cur_sec = output->reconnect_retry_sec;
+		output->reconnect_retry_cur_msec =
+			output->reconnect_retry_sec * 1000;
 		output->reconnect_retries = 0;
 	}
 
@@ -2391,9 +2398,14 @@ static void output_reconnect(struct obs_output *output)
 	}
 
 	if (output->reconnect_retries) {
-		output->reconnect_retry_cur_sec *= 2;
-		if (output->reconnect_retry_cur_sec > MAX_RETRY_SEC)
-			output->reconnect_retry_cur_sec = MAX_RETRY_SEC;
+		output->reconnect_retry_cur_msec =
+			(uint32_t)(output->reconnect_retry_cur_msec *
+				   output->reconnect_retry_exp);
+		if (output->reconnect_retry_cur_msec >
+		    RECONNECT_RETRY_MAX_MSEC) {
+			output->reconnect_retry_cur_msec =
+				RECONNECT_RETRY_MAX_MSEC;
+		}
 	}
 
 	output->reconnect_retries++;
@@ -2405,8 +2417,9 @@ static void output_reconnect(struct obs_output *output)
 		blog(LOG_WARNING, "Failed to create reconnect thread");
 		os_atomic_set_bool(&output->reconnecting, false);
 	} else {
-		blog(LOG_INFO, "Output '%s':  Reconnecting in %d seconds..",
-		     output->context.name, output->reconnect_retry_sec);
+		blog(LOG_INFO, "Output '%s':  Reconnecting in %.02f seconds..",
+		     output->context.name,
+		     (float)(output->reconnect_retry_cur_msec / 1000.0));
 
 		signal_reconnect(output);
 	}
@@ -2444,7 +2457,7 @@ void obs_output_addref(obs_output_t *output)
 	if (!output)
 		return;
 
-	obs_ref_addref(&output->control->ref);
+	obs_ref_addref(&output->context.control->ref);
 }
 
 void obs_output_release(obs_output_t *output)
@@ -2452,7 +2465,7 @@ void obs_output_release(obs_output_t *output)
 	if (!output)
 		return;
 
-	obs_weak_output_t *control = output->control;
+	obs_weak_output_t *control = get_weak(output);
 	if (obs_ref_release(&control->ref)) {
 		// The order of operations is important here since
 		// get_context_by_name in obs.c relies on weak refs
@@ -2484,7 +2497,7 @@ obs_output_t *obs_output_get_ref(obs_output_t *output)
 	if (!output)
 		return NULL;
 
-	return obs_weak_output_get_output(output->control);
+	return obs_weak_output_get_output(get_weak(output));
 }
 
 obs_weak_output_t *obs_output_get_weak_output(obs_output_t *output)
@@ -2492,7 +2505,7 @@ obs_weak_output_t *obs_output_get_weak_output(obs_output_t *output)
 	if (!output)
 		return NULL;
 
-	obs_weak_output_t *weak = output->control;
+	obs_weak_output_t *weak = get_weak(output);
 	obs_weak_output_addref(weak);
 	return weak;
 }
@@ -2617,7 +2630,23 @@ const char *obs_output_get_last_error(obs_output_t *output)
 	if (!obs_output_valid(output, "obs_output_get_last_error"))
 		return NULL;
 
-	return output->last_error_message;
+	if (output->last_error_message) {
+		return output->last_error_message;
+	} else {
+		obs_encoder_t *vencoder = output->video_encoder;
+		if (vencoder && vencoder->last_error_message) {
+			return vencoder->last_error_message;
+		}
+
+		for (size_t i = 0; i < MAX_AUDIO_MIXES; i++) {
+			obs_encoder_t *aencoder = output->audio_encoders[i];
+			if (aencoder && aencoder->last_error_message) {
+				return aencoder->last_error_message;
+			}
+		}
+	}
+
+	return NULL;
 }
 
 void obs_output_set_last_error(obs_output_t *output, const char *message)

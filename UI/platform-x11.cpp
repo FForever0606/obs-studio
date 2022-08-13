@@ -48,10 +48,12 @@
 #include <thread>
 #endif
 
-using namespace std;
+using std::string;
+using std::vector;
+using std::ostringstream;
 
 #ifdef __linux__
-void RunningInstanceCheck(bool &already_running)
+void CheckIfAlreadyRunning(bool &already_running)
 {
 	int uniq = socket(AF_LOCAL, SOCK_DGRAM | SOCK_CLOEXEC, 0);
 
@@ -131,10 +133,10 @@ struct RunOnce {
 } RO;
 const char *RunOnce::thr_name = "OBS runonce";
 
-void PIDFileCheck(bool &already_running)
+void CheckIfAlreadyRunning(bool &already_running)
 {
 	std::string tmpfile_name =
-		"/tmp/obs-studio.lock." + to_string(geteuid());
+		"/tmp/obs-studio.lock." + std::to_string(geteuid());
 	int fd = open(tmpfile_name.c_str(), O_RDWR | O_CREAT | O_EXLOCK, 0600);
 	if (fd == -1) {
 		already_running = true;
@@ -199,11 +201,6 @@ bool GetDataFilePath(const char *data, string &output)
 	return false;
 }
 
-bool InitApplicationBundle()
-{
-	return true;
-}
-
 string GetDefaultVideoSavePath()
 {
 	return string(getenv("HOME"));
@@ -211,7 +208,6 @@ string GetDefaultVideoSavePath()
 
 vector<string> GetPreferredLocales()
 {
-	setlocale(LC_ALL, "");
 	vector<string> matched;
 	string messages = setlocale(LC_MESSAGES, NULL);
 	if (!messages.size() || messages == "C" || messages == "POSIX")
@@ -249,3 +245,13 @@ void SetAlwaysOnTop(QWidget *window, bool enable)
 	window->setWindowFlags(flags);
 	window->show();
 }
+
+bool SetDisplayAffinitySupported(void)
+{
+	// Not implemented yet
+	return false;
+}
+
+// Not implemented yet
+void TaskbarOverlayInit() {}
+void TaskbarOverlaySetStatus(TaskbarOverlayStatus) {}

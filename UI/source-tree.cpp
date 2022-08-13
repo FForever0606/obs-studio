@@ -41,7 +41,8 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 	obs_source_t *source = obs_sceneitem_get_source(sceneitem);
 	const char *name = obs_source_get_name(source);
 
-	obs_data_t *privData = obs_sceneitem_get_private_settings(sceneitem);
+	OBSDataAutoRelease privData =
+		obs_sceneitem_get_private_settings(sceneitem);
 	int preset = obs_data_get_int(privData, "color-preset");
 
 	if (preset == 1) {
@@ -56,12 +57,11 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 		setStyleSheet("background: none");
 	}
 
-	obs_data_release(privData);
-
 	OBSBasic *main = reinterpret_cast<OBSBasic *>(App()->GetMainWindow());
 	const char *id = obs_source_get_id(source);
 
-	QLabel *iconLabel = nullptr;
+	bool sourceVisible = obs_sceneitem_visible(sceneitem);
+
 	if (tree->iconsVisible) {
 		QIcon icon;
 
@@ -76,14 +76,13 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 
 		iconLabel = new QLabel();
 		iconLabel->setPixmap(pixmap);
-		iconLabel->setFixedSize(16, 16);
+		iconLabel->setEnabled(sourceVisible);
 		iconLabel->setStyleSheet("background: none");
 	}
 
 	vis = new VisibilityCheckBox();
 	vis->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
-	vis->setFixedSize(16, 16);
-	vis->setChecked(obs_sceneitem_visible(sceneitem));
+	vis->setChecked(sourceVisible);
 	vis->setStyleSheet("background: none");
 	vis->setAccessibleName(QTStr("Basic.Main.Sources.Visibility"));
 	vis->setAccessibleDescription(
@@ -91,7 +90,6 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 
 	lock = new LockedCheckBox();
 	lock->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
-	lock->setFixedSize(16, 16);
 	lock->setChecked(obs_sceneitem_locked(sceneitem));
 	lock->setStyleSheet("background: none");
 	lock->setAccessibleName(QTStr("Basic.Main.Sources.Lock"));
@@ -102,6 +100,7 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 	label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 	label->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 	label->setAttribute(Qt::WA_TranslucentBackground);
+	label->setEnabled(sourceVisible);
 
 #ifdef __APPLE__
 	vis->setAttribute(Qt::WA_LayoutUsesWidgetRect);
@@ -117,7 +116,6 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 	}
 	boxLayout->addWidget(label);
 	boxLayout->addWidget(vis);
-	boxLayout->addSpacing(1);
 	boxLayout->addWidget(lock);
 #ifdef __APPLE__
 	/* Hack: Fixes a bug where scrollbars would be above the lock icon */
@@ -139,13 +137,13 @@ SourceTreeItem::SourceTreeItem(SourceTree *tree_, OBSSceneItem sceneitem_)
 
 		auto undo_redo = [](const std::string &name, int64_t id,
 				    bool val) {
-			obs_source_t *s = obs_get_source_by_name(name.c_str());
+			OBSSourceAutoRelease s =
+				obs_get_source_by_name(name.c_str());
 			obs_scene_t *sc = obs_group_or_scene_from_source(s);
 			obs_sceneitem_t *si =
 				obs_scene_find_sceneitem_by_id(sc, id);
 			if (si)
 				obs_sceneitem_set_visible(si, val);
-			obs_source_release(s);
 		};
 
 		QString str = QTStr(val ? "Undo.ShowSceneItem"
@@ -191,6 +189,9 @@ void SourceTreeItem::DisconnectSignals()
 	lockedSignal.Disconnect();
 	renameSignal.Disconnect();
 	removeSignal.Disconnect();
+
+	if (obs_sceneitem_is_group(sceneitem))
+		groupReorderSignal.Disconnect();
 }
 
 void SourceTreeItem::Clear()
@@ -308,6 +309,7 @@ void SourceTreeItem::ReconnectSignals()
 			reinterpret_cast<SourceTreeItem *>(data);
 		this_->DisconnectSignals();
 		this_->sceneitem = nullptr;
+		QMetaObject::invokeMethod(this_->tree, "RefreshItems");
 	};
 
 	obs_source_t *source = obs_sceneitem_get_source(sceneitem);
@@ -435,8 +437,8 @@ void SourceTreeItem::ExitEditModeInternal(bool save)
 	/* ----------------------------------------- */
 	/* check for existing source                 */
 
-	obs_source_t *existingSource = obs_get_source_by_name(newName.c_str());
-	obs_source_release(existingSource);
+	OBSSourceAutoRelease existingSource =
+		obs_get_source_by_name(newName.c_str());
 	bool exists = !!existingSource;
 
 	if (exists) {
@@ -453,27 +455,25 @@ void SourceTreeItem::ExitEditModeInternal(bool save)
 	std::string scene_name =
 		obs_source_get_name(main->GetCurrentSceneSource());
 	auto undo = [scene_name, prevName, main](const std::string &data) {
-		obs_source_t *source = obs_get_source_by_name(data.c_str());
+		OBSSourceAutoRelease source =
+			obs_get_source_by_name(data.c_str());
 		obs_source_set_name(source, prevName.c_str());
-		obs_source_release(source);
 
-		obs_source_t *scene_source =
+		OBSSourceAutoRelease scene_source =
 			obs_get_source_by_name(scene_name.c_str());
-		main->SetCurrentScene(scene_source, true);
-		obs_source_release(scene_source);
+		main->SetCurrentScene(scene_source.Get(), true);
 	};
 
 	std::string editedName = newName;
 
 	auto redo = [scene_name, main, editedName](const std::string &data) {
-		obs_source_t *source = obs_get_source_by_name(data.c_str());
+		OBSSourceAutoRelease source =
+			obs_get_source_by_name(data.c_str());
 		obs_source_set_name(source, editedName.c_str());
-		obs_source_release(source);
 
-		obs_source_t *scene_source =
+		OBSSourceAutoRelease scene_source =
 			obs_get_source_by_name(scene_name.c_str());
-		main->SetCurrentScene(scene_source, true);
-		obs_source_release(scene_source);
+		main->SetCurrentScene(scene_source.Get(), true);
 	};
 
 	main->undo_s.add_action(QTStr("Undo.Rename").arg(newName.c_str()), undo,
@@ -506,12 +506,17 @@ bool SourceTreeItem::eventFilter(QObject *object, QEvent *event)
 
 void SourceTreeItem::VisibilityChanged(bool visible)
 {
+	if (iconLabel) {
+		iconLabel->setEnabled(visible);
+	}
+	label->setEnabled(visible);
 	vis->setChecked(visible);
 }
 
 void SourceTreeItem::LockedChanged(bool locked)
 {
 	lock->setChecked(locked);
+	OBSBasic::Get()->UpdateEditMenu();
 }
 
 void SourceTreeItem::Renamed(const QString &name)
@@ -584,12 +589,11 @@ void SourceTreeItem::Update(bool force)
 #endif
 		boxLayout->insertWidget(0, expand);
 
-		obs_data_t *data =
+		OBSDataAutoRelease data =
 			obs_sceneitem_get_private_settings(sceneitem);
 		expand->blockSignals(true);
 		expand->setChecked(obs_data_get_bool(data, "collapsed"));
 		expand->blockSignals(false);
-		obs_data_release(data);
 
 		connect(expand, &QPushButton::toggled, this,
 			&SourceTreeItem::ExpandClicked);
@@ -602,8 +606,7 @@ void SourceTreeItem::Update(bool force)
 
 void SourceTreeItem::ExpandClicked(bool checked)
 {
-	OBSData data = obs_sceneitem_get_private_settings(sceneitem);
-	obs_data_release(data);
+	OBSDataAutoRelease data = obs_sceneitem_get_private_settings(sceneitem);
 
 	obs_data_set_bool(data, "collapsed", checked);
 
@@ -617,12 +620,14 @@ void SourceTreeItem::Select()
 {
 	tree->SelectItem(sceneitem, true);
 	OBSBasic::Get()->UpdateContextBarDeferred();
+	OBSBasic::Get()->UpdateEditMenu();
 }
 
 void SourceTreeItem::Deselect()
 {
 	tree->SelectItem(sceneitem, false);
 	OBSBasic::Get()->UpdateContextBarDeferred();
+	OBSBasic::Get()->UpdateEditMenu();
 }
 
 /* ========================================================================= */
@@ -662,7 +667,8 @@ static bool enumItem(obs_scene_t *, obs_sceneitem_t *item, void *ptr)
 	}
 
 	if (obs_sceneitem_is_group(item)) {
-		obs_data_t *data = obs_sceneitem_get_private_settings(item);
+		OBSDataAutoRelease data =
+			obs_sceneitem_get_private_settings(item);
 
 		bool collapse = obs_data_get_bool(data, "collapsed");
 		if (!collapse) {
@@ -671,8 +677,6 @@ static bool enumItem(obs_scene_t *, obs_sceneitem_t *item, void *ptr)
 
 			obs_scene_enum_items(scene, enumItem, &items);
 		}
-
-		obs_data_release(data);
 	}
 
 	items.insert(0, item);
@@ -900,8 +904,8 @@ QString SourceTreeModel::GetNewGroupName()
 
 	int i = 2;
 	for (;;) {
-		obs_source_t *group = obs_get_source_by_name(QT_TO_UTF8(name));
-		obs_source_release(group);
+		OBSSourceAutoRelease group =
+			obs_get_source_by_name(QT_TO_UTF8(name));
 		if (!group)
 			break;
 		name = QTStr("Basic.Main.Group").arg(QString::number(i++));
@@ -959,28 +963,17 @@ void SourceTreeModel::GroupSelectedItems(QModelIndexList &indices)
 	for (obs_sceneitem_t *item : item_order)
 		obs_sceneitem_select(item, false);
 
-	int newIdx = indices[0].row();
-
-	beginInsertRows(QModelIndex(), newIdx, newIdx);
-	items.insert(newIdx, item);
-	endInsertRows();
-
-	for (int i = 0; i < indices.size(); i++) {
-		int fromIdx = indices[i].row() + 1;
-		int toIdx = newIdx + i + 1;
-		if (fromIdx != toIdx) {
-			beginMoveRows(QModelIndex(), fromIdx, fromIdx,
-				      QModelIndex(), toIdx);
-			MoveItem(items, fromIdx, toIdx);
-			endMoveRows();
-		}
-	}
-
 	hasGroups = true;
 	st->UpdateWidgets(true);
 
 	obs_sceneitem_select(item, true);
 
+	/* ----------------------------------------------------------------- */
+	/* obs_scene_insert_group triggers a full refresh of scene items via */
+	/* the item_add signal. No need to insert a row, just edit the one   */
+	/* that's created automatically.                                     */
+
+	int newIdx = indices[0].row();
 	QMetaObject::invokeMethod(st, "NewGroupEdit", Qt::QueuedConnection,
 				  Q_ARG(int, newIdx));
 }
@@ -1189,7 +1182,14 @@ void SourceTree::dropEvent(QDropEvent *event)
 	QModelIndexList indices = selectedIndexes();
 
 	DropIndicatorPosition indicator = dropIndicatorPosition();
-	int row = indexAt(event->pos()).row();
+	int row = indexAt(
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+			  event->position().toPoint()
+#else
+			  event->pos()
+#endif
+				  )
+			  .row();
 	bool emptyDrop = row == -1;
 
 	if (emptyDrop) {
@@ -1283,8 +1283,16 @@ void SourceTree::dropEvent(QDropEvent *event)
 
 	/* --------------------------------------- */
 	/* save undo data                          */
-
-	OBSData undo_data = main->BackupScene(scenesource);
+	std::vector<obs_source_t *> sources;
+	for (int i = 0; i < indices.size(); i++) {
+		obs_sceneitem_t *item = items[indices[i].row()];
+		if (obs_sceneitem_get_scene(item) != scene)
+			sources.push_back(obs_scene_get_source(
+				obs_sceneitem_get_scene(item)));
+	}
+	if (dropGroup)
+		sources.push_back(obs_sceneitem_get_source(dropGroup));
+	OBSData undo_data = main->BackupScene(scene, &sources);
 
 	/* --------------------------------------- */
 	/* if selection includes base group items, */
@@ -1382,10 +1390,9 @@ void SourceTree::dropEvent(QDropEvent *event)
 	};
 
 	auto insertLastGroup = [&]() {
-		obs_data_t *data =
+		OBSDataAutoRelease data =
 			obs_sceneitem_get_private_settings(lastGroup);
 		bool collapsed = obs_data_get_bool(data, "collapsed");
-		obs_data_release(data);
 
 		if (collapsed) {
 			insertCollapsedIdx = 0;
@@ -1452,7 +1459,7 @@ void SourceTree::dropEvent(QDropEvent *event)
 	/* --------------------------------------- */
 	/* save redo data                          */
 
-	OBSData redo_data = main->BackupScene(scenesource);
+	OBSData redo_data = main->BackupScene(scene, &sources);
 
 	/* --------------------------------------- */
 	/* add undo/redo action                    */
@@ -1690,10 +1697,8 @@ void SourceTree::UpdateNoSourcesMessage()
 	std::string darkPath;
 	GetDataFilePath("themes/Dark/no_sources.svg", darkPath);
 
-	QColor color = palette().text().color();
-	bool lightTheme = (color.redF() < 0.5);
-	QString file = lightTheme ? ":res/images/no_sources.svg"
-				  : darkPath.c_str();
+	QString file = !App()->IsThemeDark() ? ":res/images/no_sources.svg"
+					     : darkPath.c_str();
 	iconNoSources.load(file);
 
 	QTextOption opt(Qt::AlignHCenter);
@@ -1716,22 +1721,24 @@ void SourceTree::paintEvent(QPaintEvent *event)
 		}
 
 		QRectF iconRect = iconNoSources.viewBoxF();
+		iconRect.setSize(QSizeF(32.0, 32.0));
 
 		QSizeF iconSize = iconRect.size();
 		QSizeF textSize = textNoSources.size();
 		QSizeF thisSize = size();
+		const qreal spacing = 16.0;
 
-		qreal totalHeight = textSize.height() + iconSize.height();
+		qreal totalHeight =
+			iconSize.height() + spacing + textSize.height();
 
-		qreal x = thisSize.width() / 2.0 - textSize.width() / 2.0;
+		qreal x = thisSize.width() / 2.0 - iconSize.width() / 2.0;
 		qreal y = thisSize.height() / 2.0 - totalHeight / 2.0;
-		p.drawStaticText(x, y, textNoSources);
-
-		x = thisSize.width() / 2.0 - iconSize.width() / 2.0;
-		y += textSize.height();
-		iconRect.moveTo(x, y);
-
+		iconRect.moveTo(std::round(x), std::round(y));
 		iconNoSources.render(&p, iconRect);
+
+		x = thisSize.width() / 2.0 - textSize.width() / 2.0;
+		y += spacing + iconSize.height();
+		p.drawStaticText(x, y, textNoSources);
 	} else {
 		QListView::paintEvent(event);
 	}

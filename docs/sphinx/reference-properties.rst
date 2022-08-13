@@ -144,8 +144,16 @@ Property Object Functions
                           - **OBS_TEXT_DEFAULT** - Single line of text
                           - **OBS_TEXT_PASSWORD** - Single line of text (passworded)
                           - **OBS_TEXT_MULTILINE** - Multi-line text
+                          - **OBS_TEXT_INFO** - Read-only informative text, behaves differently
+                            depending on wether description, string value and long description
+                            are set
 
    :return:               The property
+
+   Important Related Functions:
+
+   - :c:func:`obs_property_text_set_info_type`
+   - :c:func:`obs_property_text_set_info_word_wrap`
 
 ---------------------
 
@@ -239,6 +247,11 @@ Property Object Functions
    :param    name:        Setting identifier string
    :param    description: Localized name shown to user
    :return:               The property
+
+   Important Related Functions:
+
+      - :c:func:`obs_property_button_set_type`
+      - :c:func:`obs_property_button_set_url`
 
    Relevant data types used with this function:
 
@@ -432,6 +445,20 @@ Property Enumeration Functions
 
 ---------------------
 
+.. function:: enum obs_text_info_type     obs_property_text_info_type(obs_property_t *p)
+
+   :return: One of the following values:
+
+             - OBS_TEXT_INFO_NORMAL
+             - OBS_TEXT_INFO_WARNING
+             - OBS_TEXT_INFO_ERROR
+
+---------------------
+
+.. function:: bool     obs_property_text_info_word_wrap(obs_property_t *p)
+
+---------------------
+
 .. function:: enum obs_path_type     obs_property_path_type(obs_property_t *p)
 
 ---------------------
@@ -512,6 +539,19 @@ Property Enumeration Functions
 
 ---------------------
 
+.. function:: enum obs_button_type obs_property_button_type(obs_property_t *p)
+
+   :return: One of the following values:
+
+             - OBS_BUTTON_DEFAULT
+             - OBS_BUTTON_URL
+
+---------------------
+
+.. function:: const char *obs_property_button_url(obs_property_t *p)
+
+---------------------
+
 .. function:: enum obs_group_type obs_property_group_type(obs_property_t *p)
 
   :return: One of the following values:
@@ -582,6 +622,20 @@ Property Modification Functions
 ---------------------
 
 .. function:: void obs_property_float_set_limits(obs_property_t *p, double min, double max, double step)
+
+---------------------
+
+.. function:: void     obs_property_text_set_info_type(obs_property_t *p, enum obs_text_info_type type)
+
+   :param   type: Can be one of the following values:
+
+                  - **OBS_TEXT_INFO_NORMAL** - To show a basic message
+                  - **OBS_TEXT_INFO_WARNING** - To show a warning
+                  - **OBS_TEXT_INFO_ERROR** - To show an error
+
+---------------------
+
+.. function:: void     obs_property_text_set_info_word_wrap(obs_property_t *p, bool word_wrap)
 
 ---------------------
 
@@ -658,3 +712,17 @@ Property Modification Functions
 ---------------------
 
 .. function:: void obs_property_frame_rate_fps_range_insert(obs_property_t *p, size_t idx, struct media_frames_per_second min, struct media_frames_per_second max)
+
+---------------------
+
+.. function:: void obs_property_button_set_type(obs_property_t *p, enum obs_button_type type)
+
+   :param   type: Can be one of the following values:
+
+                  - **OBS_BUTTON_DEFAULT** - Standard button
+                  - **OBS_BUTTON_URL** - Button that opens a URL
+   :return:       The property
+
+---------------------
+
+.. function:: void obs_property_button_set_url(obs_property_t *p, char *url)

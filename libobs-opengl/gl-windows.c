@@ -74,7 +74,7 @@ static inline int get_stencil_format_bits(enum gs_zstencil_format zsformat)
 static inline void init_dummy_pixel_format(PIXELFORMATDESCRIPTOR *pfd)
 {
 	memset(pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
-	pfd->nSize = sizeof(pfd);
+	pfd->nSize = sizeof(PIXELFORMATDESCRIPTOR);
 	pfd->nVersion = 1;
 	pfd->iPixelType = PFD_TYPE_RGBA;
 	pfd->cColorBits = 32;
@@ -573,6 +573,12 @@ void device_load_swapchain(gs_device_t *device, gs_swapchain_t *swap)
 	}
 }
 
+bool device_is_present_ready(gs_device_t *device)
+{
+	UNUSED_PARAMETER(device);
+	return true;
+}
+
 void device_present(gs_device_t *device)
 {
 	if (!SwapBuffers(device->cur_swap->wi->hdc)) {
@@ -596,6 +602,11 @@ extern void gl_getclientsize(const struct gs_swap_chain *swap, uint32_t *width,
 		*width = 0;
 		*height = 0;
 	}
+}
+
+EXPORT bool device_is_monitor_hdr(gs_device_t *device, void *monitor)
+{
+	return false;
 }
 
 EXPORT bool device_gdi_texture_available(void)

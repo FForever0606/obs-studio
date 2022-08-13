@@ -144,11 +144,63 @@ Initialization, Shutdown, and Information
 
 ---------------------
 
+.. function:: bool obs_reset_audio2(const struct obs_audio_info2 *oai)
+
+   Sets base audio output format/channels/samples/etc. Also allows the
+   ability to set the maximum audio latency of OBS, and set whether the
+   audio buffering is fixed or dynamically increasing.
+
+   When using fixed audio buffering, OBS will automatically buffer to
+   the maximum audio latency on startup.
+
+   Maximum audio latency will clamp to the closest multiple of the audio
+   output frames (which is typically 1024 audio frames).
+
+   Note: Cannot reset base audio if an output is currently active.
+
+   :return: *true* if successful, *false* otherwise
+
+   Relevant data types used with this function:
+
+.. code:: cpp
+
+   struct obs_audio_info2 {
+           uint32_t            samples_per_sec;
+           enum speaker_layout speakers;
+
+           uint32_t max_buffering_ms;
+           bool fixed_buffering;
+   };
+
+---------------------
+
 .. function:: bool obs_get_video_info(struct obs_video_info *ovi)
 
    Gets the current video settings.
-   
+
    :return: *false* if no video
+
+---------------------
+
+.. function:: float obs_get_video_sdr_white_level(void)
+
+   Gets the current SDR white level.
+
+   :return: SDR white level, 300.f if no video
+
+---------------------
+
+.. function:: float obs_get_video_hdr_nominal_peak_level(void)
+
+   Gets the current HDR nominal peak level.
+
+   :return: HDR nominal peak level, 1000.f if no video
+
+---------------------
+
+.. function:: void obs_set_video_sdr_white_level(float sdr_white_level, float hdr_nominal_peak_level)
+
+   Sets the current video levels.
 
 ---------------------
 
@@ -259,6 +311,24 @@ Libobs Objects
   
    Increments the source reference counter, use
    :c:func:`obs_source_release()` to release it when complete.
+
+---------------------
+
+.. function:: obs_source_t *obs_get_transition_by_name(const char *name)
+
+   Gets a transition by its name.
+  
+   Increments the source reference counter, use
+   :c:func:`obs_source_release()` to release it when complete.
+
+---------------------
+
+.. function:: obs_scene_t *obs_get_scene_by_name(const char *name)
+
+   Gets a scene by its name.
+  
+   Increments the scene reference counter, use
+   :c:func:`obs_scene_release()` to release it when complete.
 
 ---------------------
 
@@ -416,6 +486,12 @@ Video, Audio, and Graphics
 
 ---------------------
 
+.. function:: bool obs_audio_monitoring_available(void)
+
+   :return: Whether audio monitoring is supported and available on the current platform
+
+---------------------
+
 .. function:: void obs_enum_audio_monitoring_devices(obs_enum_audio_device_cb cb, void *data)
 
    Enumerates audio devices which can be used for audio monitoring.
@@ -458,6 +534,18 @@ Video, Audio, and Graphics
    :param callback:   The callback that receives raw video frames.
    :param param:      The private data associated with the callback.
 
+---------------------
+
+.. function:: void obs_add_raw_audio_callback(size_t mix_idx, const struct audio_convert_info *conversion, audio_output_callback_t callback, void *param)
+              void obs_remove_raw_raw_callback(size_t track, audio_output_callback_t callback, void *param)
+
+   Adds/removes a raw audio callback.  Allows the ability to obtain raw
+   audio data without necessarily using an output.
+
+   :param mix_idx:    Specifies audio track to get data from.
+   :param conversion: Specifies conversion requirements.  Can be NULL.
+   :param callback:   The callback that receives raw audio data.
+   :param param:      The private data associated with the callback.
 
 Primary signal/procedure handlers
 ---------------------------------
@@ -581,7 +669,7 @@ Displays
   
    *(Important note: do not use more than one display widget within the
    hierarchy of the same base window; this will cause presentation
-   stalls on Macs.)*
+   stalls on macOS.)*
 
    :param  graphics_data: The swap chain initialization data
    :return:               The new display context, or NULL if failed

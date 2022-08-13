@@ -58,6 +58,7 @@ enum obs_icon_type {
 	OBS_ICON_TYPE_MEDIA,
 	OBS_ICON_TYPE_BROWSER,
 	OBS_ICON_TYPE_CUSTOM,
+	OBS_ICON_TYPE_PROCESS_AUDIO_OUTPUT,
 };
 
 enum obs_media_state {
@@ -195,6 +196,12 @@ enum obs_media_state {
  * Source understands SRGB rendering
  */
 #define OBS_SOURCE_SRGB (1 << 15)
+
+/**
+ * Source type prefers not to have its properties shown on creation
+ * (prefers to rely on defaults first)
+ */
+#define OBS_SOURCE_CAP_DONT_SHOW_PROPERTIES (1 << 16)
 
 /** @} */
 
@@ -540,6 +547,11 @@ struct obs_source_info {
 
 	/** Missing files **/
 	obs_missing_files_t *(*missing_files)(void *data);
+
+	/** Get color space **/
+	enum gs_color_space (*video_get_color_space)(
+		void *data, size_t count,
+		const enum gs_color_space *preferred_spaces);
 };
 
 EXPORT void obs_register_source_s(const struct obs_source_info *info,

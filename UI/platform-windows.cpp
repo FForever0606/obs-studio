@@ -37,6 +37,11 @@
 #include <util/windows/HRError.hpp>
 #include <util/windows/ComPtr.hpp>
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+#include <QWinTaskbarButton>
+#include <QMainWindow>
+#endif
+
 using namespace std;
 
 static inline bool check_path(const char *data, const char *path,
@@ -57,11 +62,6 @@ bool GetDataFilePath(const char *data, string &output)
 		return true;
 
 	return check_path(data, OBS_DATA_PATH "/obs-studio/", output);
-}
-
-bool InitApplicationBundle()
-{
-	return true;
 }
 
 string GetDefaultVideoSavePath()
@@ -162,6 +162,20 @@ uint32_t GetWindowsVersion()
 	return ver;
 }
 
+uint32_t GetWindowsBuild()
+{
+	static uint32_t build = 0;
+
+	if (build == 0) {
+		struct win_version_info ver_info;
+
+		get_win_ver(&ver_info);
+		build = ver_info.build;
+	}
+
+	return build;
+}
+
 void SetAeroEnabled(bool enable)
 {
 	static HRESULT(WINAPI * func)(UINT) = nullptr;
@@ -229,6 +243,27 @@ void SetWin32DropStyle(QWidget *window)
 	SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_style);
 }
 
+bool SetDisplayAffinitySupported(void)
+{
+	static bool checked = false;
+	static bool supported;
+
+	/* this has to be version gated as setting WDA_EXCLUDEFROMCAPTURE on
+	   older Windows builds behaves like WDA_MONITOR (black box) */
+
+	if (!checked) {
+		if (GetWindowsVersion() > 0x0A00 ||
+		    GetWindowsVersion() == 0x0A00 && GetWindowsBuild() >= 19041)
+			supported = true;
+		else
+			supported = false;
+
+		checked = true;
+	}
+
+	return supported;
+}
+
 bool DisableAudioDucking(bool disable)
 {
 	ComPtr<IMMDeviceEnumerator> devEmum;
@@ -293,7 +328,7 @@ RunOnceMutex &RunOnceMutex::operator=(RunOnceMutex &&rom)
 	return *this;
 }
 
-RunOnceMutex GetRunOnceMutex(bool &already_running)
+RunOnceMutex CheckIfAlreadyRunning(bool &already_running)
 {
 	string name;
 
@@ -368,17 +403,17 @@ QString GetMonitorName(const QString &id)
 	}
 
 	UINT32 numPath, numMode;
-	if (!GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &numPath,
-					 &numMode) == ERROR_SUCCESS) {
+	if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &numPath,
+					&numMode) != ERROR_SUCCESS) {
 		return GENERIC_MONITOR_NAME;
 	}
 
 	std::vector<DISPLAYCONFIG_PATH_INFO> paths(numPath);
 	std::vector<DISPLAYCONFIG_MODE_INFO> modes(numMode);
 
-	if (!QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &numPath, paths.data(),
-				&numMode, modes.data(),
-				nullptr) == ERROR_SUCCESS) {
+	if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &numPath, paths.data(),
+			       &numMode, modes.data(),
+			       nullptr) != ERROR_SUCCESS) {
 		return GENERIC_MONITOR_NAME;
 	}
 
@@ -414,3 +449,109 @@ QString GetMonitorName(const QString &id)
 
 	return QString::fromWCharArray(target.monitorFriendlyDeviceName);
 }
+
+/* Based on https://www.winehq.org/pipermail/wine-devel/2008-September/069387.html */
+typedef const char *(CDECL *WINEGETVERSION)(void);
+bool IsRunningOnWine()
+{
+	WINEGETVERSION func;
+	HMODULE nt;
+
+	nt = GetModuleHandleW(L"ntdll");
+	if (!nt)
+		return false;
+
+	func = (WINEGETVERSION)GetProcAddress(nt, "wine_get_version");
+	if (func) {
+		blog(LOG_WARNING, "Running on Wine version \"%s\"", func());
+		return true;
+	}
+
+	return false;
+}
+
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+QWinTaskbarButton *taskBtn;
+
+void TaskbarOverlayInit()
+{
+	QMainWindow *main = App()->GetMainWindow();
+	taskBtn = new QWinTaskbarButton(main);
+	taskBtn->setWindow(main->windowHandle());
+}
+
+void TaskbarOverlaySetStatus(TaskbarOverlayStatus status)
+{
+	if (status == TaskbarOverlayStatusInactive) {
+		taskBtn->clearOverlayIcon();
+		return;
+	}
+
+	QIcon icon;
+	if (status == TaskbarOverlayStatusActive) {
+		icon = QIcon::fromTheme("obs-active",
+					QIcon(":/res/images/active.png"));
+	} else {
+		icon = QIcon::fromTheme("obs-paused",
+					QIcon(":/res/images/paused.png"));
+	}
+	taskBtn->setOverlayIcon(icon);
+}
+#else
+
+HWND hwnd;
+void TaskbarOverlayInit()
+{
+	hwnd = (HWND)App()->GetMainWindow()->winId();
+}
+
+void TaskbarOverlaySetStatus(TaskbarOverlayStatus status)
+{
+	ITaskbarList4 *taskbarIcon;
+	auto hr = CoCreateInstance(CLSID_TaskbarList, NULL,
+				   CLSCTX_INPROC_SERVER,
+				   IID_PPV_ARGS(&taskbarIcon));
+
+	if (FAILED(hr)) {
+		taskbarIcon->Release();
+		return;
+	}
+
+	hr = taskbarIcon->HrInit();
+
+	if (FAILED(hr)) {
+		taskbarIcon->Release();
+		return;
+	}
+
+	if (status != TaskbarOverlayStatusInactive) {
+		QIcon qicon;
+		switch (status) {
+		case TaskbarOverlayStatusActive:
+			qicon = QIcon::fromTheme(
+				"obs-active", QIcon(":/res/images/active.png"));
+			break;
+		case TaskbarOverlayStatusPaused:
+			qicon = QIcon::fromTheme(
+				"obs-paused", QIcon(":/res/images/paused.png"));
+			break;
+		}
+
+		HICON hicon = nullptr;
+		if (!qicon.isNull()) {
+			Q_GUI_EXPORT HICON qt_pixmapToWinHICON(
+				const QPixmap &p);
+			hicon = qt_pixmapToWinHICON(
+				qicon.pixmap(GetSystemMetrics(SM_CXSMICON)));
+			if (!hicon)
+				return;
+		}
+
+		taskbarIcon->SetOverlayIcon(hwnd, hicon, nullptr);
+		DestroyIcon(hicon);
+	} else {
+		taskbarIcon->SetOverlayIcon(hwnd, nullptr, nullptr);
+	}
+	taskbarIcon->Release();
+}
+#endif

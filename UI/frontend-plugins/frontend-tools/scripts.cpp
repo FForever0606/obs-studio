@@ -1,6 +1,5 @@
 #include "obs-module.h"
 #include "scripts.hpp"
-#include "frontend-tools-config.h"
 #include "../../properties-view.hpp"
 #include "../../qt-wrappers.hpp"
 
@@ -33,7 +32,7 @@
 
 #include "ui_scripts.h"
 
-#if COMPILE_PYTHON && (defined(_WIN32) || defined(__APPLE__))
+#if defined(Python_FOUND) && (defined(_WIN32) || defined(__APPLE__))
 #define PYTHON_UI 1
 #else
 #define PYTHON_UI 0
@@ -49,7 +48,7 @@
 
 /* ----------------------------------------------------------------- */
 
-using OBSScript = OBSObj<obs_script_t *, obs_script_destroy>;
+using OBSScript = OBSPtr<obs_script_t *, obs_script_destroy>;
 
 struct ScriptData {
 	std::vector<OBSScript> scripts;
@@ -218,8 +217,6 @@ ScriptsTool::~ScriptsTool()
 	config_t *global_config = obs_frontend_get_global_config();
 	config_set_int(global_config, "scripts-tool", "prevScriptRow",
 		       ui->scripts->currentRow());
-
-	delete ui;
 }
 
 void ScriptsTool::RemoveScript(const char *path)
@@ -243,8 +240,7 @@ void ScriptsTool::ReloadScript(const char *path)
 		if (strcmp(script_path, path) == 0) {
 			obs_script_reload(script);
 
-			OBSData settings = obs_data_create();
-			obs_data_release(settings);
+			OBSDataAutoRelease settings = obs_data_create();
 
 			obs_properties_t *prop =
 				obs_script_get_properties(script);
@@ -275,9 +271,9 @@ void ScriptsTool::SetScriptDefaults(const char *path)
 	for (OBSScript &script : scriptData->scripts) {
 		const char *script_path = obs_script_get_path(script);
 		if (strcmp(script_path, path) == 0) {
-			obs_data_t *settings = obs_script_get_settings(script);
+			OBSDataAutoRelease settings =
+				obs_script_get_settings(script);
 			obs_data_clear(settings);
-			obs_data_release(settings);
 
 			obs_script_update(script, nullptr);
 			on_reloadScripts_clicked();
@@ -353,8 +349,7 @@ void ScriptsTool::on_addScripts_clicked()
 			item->setData(Qt::UserRole, QString(file));
 			ui->scripts->addItem(item);
 
-			OBSData settings = obs_data_create();
-			obs_data_release(settings);
+			OBSDataAutoRelease settings = obs_data_create();
 
 			obs_properties_t *prop =
 				obs_script_get_properties(script);
@@ -499,11 +494,10 @@ void ScriptsTool::on_scripts_currentRowChanged(int row)
 		return;
 	}
 
-	OBSData settings = obs_script_get_settings(script);
-	obs_data_release(settings);
+	OBSDataAutoRelease settings = obs_script_get_settings(script);
 
 	propertiesView = new OBSPropertiesView(
-		settings, script,
+		settings.Get(), script,
 		(PropertiesReloadCallback)obs_script_get_properties, nullptr,
 		(PropertiesVisualUpdateCb)obs_script_update);
 	ui->propertiesLayout->addWidget(propertiesView);
@@ -568,9 +562,15 @@ static void obs_event(enum obs_frontend_event event, void *)
 		delete scriptsWindow;
 		delete scriptLogWindow;
 
+		scriptData = nullptr;
+		scriptsWindow = nullptr;
+		scriptLogWindow = nullptr;
+
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {
-		scriptLogWindow->hide();
-		scriptLogWindow->Clear();
+		if (scriptLogWindow) {
+			scriptLogWindow->hide();
+			scriptLogWindow->Clear();
+		}
 
 		delete scriptData;
 		scriptData = new ScriptData;
@@ -579,30 +579,26 @@ static void obs_event(enum obs_frontend_event event, void *)
 
 static void load_script_data(obs_data_t *load_data, bool, void *)
 {
-	obs_data_array_t *array = obs_data_get_array(load_data, "scripts-tool");
+	OBSDataArrayAutoRelease array =
+		obs_data_get_array(load_data, "scripts-tool");
 
 	delete scriptData;
 	scriptData = new ScriptData;
 
 	size_t size = obs_data_array_count(array);
 	for (size_t i = 0; i < size; i++) {
-		obs_data_t *obj = obs_data_array_item(array, i);
+		OBSDataAutoRelease obj = obs_data_array_item(array, i);
 		const char *path = obs_data_get_string(obj, "path");
-		obs_data_t *settings = obs_data_get_obj(obj, "settings");
+		OBSDataAutoRelease settings = obs_data_get_obj(obj, "settings");
 
 		obs_script_t *script = obs_script_create(path, settings);
 		if (script) {
 			scriptData->scripts.emplace_back(script);
 		}
-
-		obs_data_release(settings);
-		obs_data_release(obj);
 	}
 
 	if (scriptsWindow)
 		scriptsWindow->RefreshLists();
-
-	obs_data_array_release(array);
 }
 
 static void save_script_data(obs_data_t *save_data, bool saving, void *)
@@ -610,23 +606,19 @@ static void save_script_data(obs_data_t *save_data, bool saving, void *)
 	if (!saving)
 		return;
 
-	obs_data_array_t *array = obs_data_array_create();
+	OBSDataArrayAutoRelease array = obs_data_array_create();
 
 	for (OBSScript &script : scriptData->scripts) {
 		const char *script_path = obs_script_get_path(script);
-		obs_data_t *settings = obs_script_save(script);
+		OBSDataAutoRelease settings = obs_script_save(script);
 
-		obs_data_t *obj = obs_data_create();
+		OBSDataAutoRelease obj = obs_data_create();
 		obs_data_set_string(obj, "path", script_path);
 		obs_data_set_obj(obj, "settings", settings);
 		obs_data_array_push_back(array, obj);
-		obs_data_release(obj);
-
-		obs_data_release(settings);
 	}
 
 	obs_data_set_array(save_data, "scripts-tool", array);
-	obs_data_array_release(array);
 }
 
 static void script_log(void *, obs_script_t *script, int log_level,
@@ -659,6 +651,22 @@ extern "C" void InitScripts()
 	config_t *config = obs_frontend_get_global_config();
 	const char *python_path =
 		config_get_string(config, "Python", "Path" ARCH_NAME);
+
+#ifdef __APPLE__
+	if (python_path && *python_path) {
+		std::string _python_path(python_path);
+		std::size_t pos =
+			_python_path.find("/Python.framework/Versions");
+
+		if (pos != std::string::npos) {
+			std::string _temp = _python_path.substr(0, pos);
+			config_set_string(config, "Python", "Path" ARCH_NAME,
+					  _temp.c_str());
+			config_save(config);
+			python_path = _temp.c_str();
+		}
+	}
+#endif
 
 	if (!obs_scripting_python_loaded() && python_path && *python_path)
 		obs_scripting_load_python(python_path);

@@ -133,8 +133,7 @@ static obs_source_t *get_transition(struct slideshow *ss)
 	obs_source_t *tr;
 
 	pthread_mutex_lock(&ss->mutex);
-	tr = ss->transition;
-	obs_source_addref(tr);
+	tr = obs_source_get_ref(ss->transition);
 	pthread_mutex_unlock(&ss->mutex);
 
 	return tr;
@@ -151,8 +150,7 @@ static obs_source_t *get_source(struct darray *array, const char *path)
 		const char *cur_path = files.array[i].path;
 
 		if (strcmp(path, cur_path) == 0) {
-			source = files.array[i].source;
-			obs_source_addref(source);
+			source = obs_source_get_ref(files.array[i].source);
 			break;
 		}
 	}
@@ -656,7 +654,7 @@ static void *ss_create(obs_data_t *settings, obs_source_t *source)
 		source, "SlideShow.Stop", obs_module_text("SlideShow.Stop"),
 		stop_hotkey, ss);
 
-	ss->prev_hotkey = obs_hotkey_register_source(
+	ss->next_hotkey = obs_hotkey_register_source(
 		source, "SlideShow.NextSlide",
 		obs_module_text("SlideShow.NextSlide"), next_slide_hotkey, ss);
 
@@ -895,9 +893,14 @@ static obs_properties_t *ss_properties(void *data)
 	obs_property_list_add_string(p, T_TR_SWIPE, TR_SWIPE);
 	obs_property_list_add_string(p, T_TR_SLIDE, TR_SLIDE);
 
-	obs_properties_add_int(ppts, S_SLIDE_TIME, T_SLIDE_TIME, 50, 3600000,
-			       50);
-	obs_properties_add_int(ppts, S_TR_SPEED, T_TR_SPEED, 0, 3600000, 50);
+	p = obs_properties_add_int(ppts, S_SLIDE_TIME, T_SLIDE_TIME, 50,
+				   3600000, 50);
+	obs_property_int_set_suffix(p, " ms");
+
+	p = obs_properties_add_int(ppts, S_TR_SPEED, T_TR_SPEED, 0, 3600000,
+				   50);
+	obs_property_int_set_suffix(p, " ms");
+
 	obs_properties_add_bool(ppts, S_LOOP, T_LOOP);
 	obs_properties_add_bool(ppts, S_HIDE, T_HIDE);
 	obs_properties_add_bool(ppts, S_RANDOMIZE, T_RANDOMIZE);

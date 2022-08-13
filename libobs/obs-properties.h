@@ -88,6 +88,13 @@ enum obs_text_type {
 	OBS_TEXT_DEFAULT,
 	OBS_TEXT_PASSWORD,
 	OBS_TEXT_MULTILINE,
+	OBS_TEXT_INFO,
+};
+
+enum obs_text_info_type {
+	OBS_TEXT_INFO_NORMAL,
+	OBS_TEXT_INFO_WARNING,
+	OBS_TEXT_INFO_ERROR,
 };
 
 enum obs_number_type {
@@ -99,6 +106,11 @@ enum obs_group_type {
 	OBS_COMBO_INVALID,
 	OBS_GROUP_NORMAL,
 	OBS_GROUP_CHECKABLE,
+};
+
+enum obs_button_type {
+	OBS_BUTTON_DEFAULT,
+	OBS_BUTTON_URL,
 };
 
 #define OBS_FONT_BOLD (1 << 0)
@@ -318,7 +330,9 @@ EXPORT double obs_property_float_step(obs_property_t *p);
 EXPORT enum obs_number_type obs_property_float_type(obs_property_t *p);
 EXPORT const char *obs_property_float_suffix(obs_property_t *p);
 EXPORT enum obs_text_type obs_property_text_type(obs_property_t *p);
-EXPORT enum obs_text_type obs_property_text_monospace(obs_property_t *p);
+EXPORT bool obs_property_text_monospace(obs_property_t *p);
+EXPORT enum obs_text_info_type obs_property_text_info_type(obs_property_t *p);
+EXPORT bool obs_property_text_info_word_wrap(obs_property_t *p);
 EXPORT enum obs_path_type obs_property_path_type(obs_property_t *p);
 EXPORT const char *obs_property_path_filter(obs_property_t *p);
 EXPORT const char *obs_property_path_default_path(obs_property_t *p);
@@ -333,6 +347,14 @@ EXPORT void obs_property_int_set_suffix(obs_property_t *p, const char *suffix);
 EXPORT void obs_property_float_set_suffix(obs_property_t *p,
 					  const char *suffix);
 EXPORT void obs_property_text_set_monospace(obs_property_t *p, bool monospace);
+EXPORT void obs_property_text_set_info_type(obs_property_t *p,
+					    enum obs_text_info_type type);
+EXPORT void obs_property_text_set_info_word_wrap(obs_property_t *p,
+						 bool word_wrap);
+
+EXPORT void obs_property_button_set_type(obs_property_t *p,
+					 enum obs_button_type type);
+EXPORT void obs_property_button_set_url(obs_property_t *p, char *url);
 
 EXPORT void obs_property_list_clear(obs_property_t *p);
 
@@ -400,6 +422,9 @@ obs_property_frame_rate_fps_range_max(obs_property_t *p, size_t idx);
 
 EXPORT enum obs_group_type obs_property_group_type(obs_property_t *p);
 EXPORT obs_properties_t *obs_property_group_content(obs_property_t *p);
+
+EXPORT enum obs_button_type obs_property_button_type(obs_property_t *p);
+EXPORT const char *obs_property_button_url(obs_property_t *p);
 
 #ifndef SWIG
 OBS_DEPRECATED

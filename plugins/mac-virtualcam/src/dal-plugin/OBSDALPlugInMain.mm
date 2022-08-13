@@ -17,18 +17,14 @@
 //  You should have received a copy of the GNU General Public License
 //  along with obs-mac-virtualcam. If not, see <http://www.gnu.org/licenses/>.
 
-#import <CoreMediaIO/CMIOHardwarePlugin.h>
-
 #import "OBSDALPlugInInterface.h"
 #import "Logging.h"
 #import "Defines.h"
 
 //! PlugInMain is the entrypoint for the plugin
 extern "C" {
-void *PlugInMain(CFAllocatorRef allocator, CFUUIDRef requestedTypeUUID)
+void *PlugInMain(CFAllocatorRef, CFUUIDRef requestedTypeUUID)
 {
-	UNUSED_PARAMETER(allocator);
-
 	DLogFunc(@"version=%@", PLUGIN_VERSION);
 	if (!CFEqual(requestedTypeUUID, kCMIOHardwarePlugInTypeID)) {
 		return 0;

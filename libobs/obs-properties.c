@@ -56,6 +56,8 @@ struct path_data {
 struct text_data {
 	enum obs_text_type type;
 	bool monospace;
+	enum obs_text_info_type info_type;
+	bool info_word_wrap;
 };
 
 struct list_data {
@@ -72,6 +74,8 @@ struct editable_list_data {
 
 struct button_data {
 	obs_property_clicked_t callback;
+	enum obs_button_type type;
+	char *url;
 };
 
 struct frame_rate_option {
@@ -598,6 +602,8 @@ obs_property_t *obs_properties_add_text(obs_properties_t *props,
 	struct obs_property *p = new_prop(props, name, desc, OBS_PROPERTY_TEXT);
 	struct text_data *data = get_property_data(p);
 	data->type = type;
+	data->info_type = OBS_TEXT_INFO_NORMAL;
+	data->info_word_wrap = true;
 	return p;
 }
 
@@ -1014,10 +1020,22 @@ enum obs_text_type obs_property_text_type(obs_property_t *p)
 	return data ? data->type : OBS_TEXT_DEFAULT;
 }
 
-enum obs_text_type obs_property_text_monospace(obs_property_t *p)
+bool obs_property_text_monospace(obs_property_t *p)
 {
 	struct text_data *data = get_type_data(p, OBS_PROPERTY_TEXT);
 	return data ? data->monospace : false;
+}
+
+enum obs_text_info_type obs_property_text_info_type(obs_property_t *p)
+{
+	struct text_data *data = get_type_data(p, OBS_PROPERTY_TEXT);
+	return data ? data->info_type : OBS_TEXT_INFO_NORMAL;
+}
+
+bool obs_property_text_info_word_wrap(obs_property_t *p)
+{
+	struct text_data *data = get_type_data(p, OBS_PROPERTY_TEXT);
+	return data ? data->info_word_wrap : true;
 }
 
 enum obs_path_type obs_property_path_type(obs_property_t *p)
@@ -1100,6 +1118,43 @@ void obs_property_text_set_monospace(obs_property_t *p, bool monospace)
 		return;
 
 	data->monospace = monospace;
+}
+
+void obs_property_text_set_info_type(obs_property_t *p,
+				     enum obs_text_info_type type)
+{
+	struct text_data *data = get_type_data(p, OBS_PROPERTY_TEXT);
+	if (!data)
+		return;
+
+	data->info_type = type;
+}
+
+void obs_property_text_set_info_word_wrap(obs_property_t *p, bool word_wrap)
+{
+	struct text_data *data = get_type_data(p, OBS_PROPERTY_TEXT);
+	if (!data)
+		return;
+
+	data->info_word_wrap = word_wrap;
+}
+
+void obs_property_button_set_type(obs_property_t *p, enum obs_button_type type)
+{
+	struct button_data *data = get_type_data(p, OBS_PROPERTY_BUTTON);
+	if (!data)
+		return;
+
+	data->type = type;
+}
+
+void obs_property_button_set_url(obs_property_t *p, char *url)
+{
+	struct button_data *data = get_type_data(p, OBS_PROPERTY_BUTTON);
+	if (!data)
+		return;
+
+	data->url = url;
 }
 
 void obs_property_list_clear(obs_property_t *p)
@@ -1434,4 +1489,16 @@ obs_properties_t *obs_property_group_content(obs_property_t *p)
 {
 	struct group_data *data = get_type_data(p, OBS_PROPERTY_GROUP);
 	return data ? data->content : NULL;
+}
+
+enum obs_button_type obs_property_button_type(obs_property_t *p)
+{
+	struct button_data *data = get_type_data(p, OBS_PROPERTY_BUTTON);
+	return data ? data->type : OBS_BUTTON_DEFAULT;
+}
+
+const char *obs_property_button_url(obs_property_t *p)
+{
+	struct button_data *data = get_type_data(p, OBS_PROPERTY_BUTTON);
+	return data ? data->url : "";
 }

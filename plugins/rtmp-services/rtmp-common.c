@@ -21,6 +21,8 @@ struct rtmp_common {
 	size_t supported_resolutions_count;
 	int max_fps;
 
+	char **video_codecs;
+
 	bool supports_additional_audio_track;
 };
 
@@ -113,17 +115,19 @@ static void rtmp_common_update(void *data, obs_data_t *settings)
 {
 	struct rtmp_common *service = data;
 
+	bfree(service->supported_resolutions);
+	bfree(service->video_codecs);
 	bfree(service->service);
 	bfree(service->server);
 	bfree(service->output);
 	bfree(service->key);
-	bfree(service->supported_resolutions);
 
 	service->service = bstrdup(obs_data_get_string(settings, "service"));
 	service->server = bstrdup(obs_data_get_string(settings, "server"));
 	service->key = bstrdup(obs_data_get_string(settings, "key"));
 	service->supports_additional_audio_track = false;
 	service->output = NULL;
+	service->video_codecs = NULL;
 	service->supported_resolutions = NULL;
 	service->supported_resolutions_count = 0;
 	service->max_fps = 0;
@@ -160,6 +164,7 @@ static void rtmp_common_destroy(void *data)
 	struct rtmp_common *service = data;
 
 	bfree(service->supported_resolutions);
+	bfree(service->video_codecs);
 	bfree(service->service);
 	bfree(service->server);
 	bfree(service->output);
@@ -424,6 +429,16 @@ static void fill_more_info_link(json_t *service, obs_data_t *settings)
 		obs_data_set_string(settings, "more_info_link", more_info_link);
 }
 
+static void fill_stream_key_link(json_t *service, obs_data_t *settings)
+{
+	const char *stream_key_link;
+
+	stream_key_link = get_string_val(service, "stream_key_link");
+	if (stream_key_link)
+		obs_data_set_string(settings, "stream_key_link",
+				    stream_key_link);
+}
+
 static inline json_t *find_service(json_t *root, const char *name,
 				   const char **p_new_name)
 {
@@ -487,6 +502,7 @@ static bool service_selected(obs_properties_t *props, obs_property_t *p,
 
 	fill_servers(obs_properties_get(props, "server"), service, name);
 	fill_more_info_link(service, settings);
+	fill_stream_key_link(service, settings);
 	return true;
 }
 
@@ -538,6 +554,8 @@ static obs_properties_t *rtmp_common_properties(void *unused)
 	return ppts;
 }
 
+static int get_bitrate_matrix_max(json_t *array);
+
 static void apply_video_encoder_settings(obs_data_t *settings,
 					 json_t *recommended)
 {
@@ -559,13 +577,21 @@ static void apply_video_encoder_settings(obs_data_t *settings,
 
 	obs_data_item_release(&enc_item);
 
+	int max_bitrate = 0;
+	item = json_object_get(recommended, "bitrate matrix");
+	if (json_is_array(item)) {
+		max_bitrate = get_bitrate_matrix_max(item);
+	}
+
 	item = json_object_get(recommended, "max video bitrate");
-	if (json_is_integer(item)) {
-		int max_bitrate = (int)json_integer_value(item);
-		if (obs_data_get_int(settings, "bitrate") > max_bitrate) {
-			obs_data_set_int(settings, "bitrate", max_bitrate);
-			obs_data_set_int(settings, "buffer_size", max_bitrate);
-		}
+	if (!max_bitrate && json_is_integer(item)) {
+		max_bitrate = (int)json_integer_value(item);
+	}
+
+	if (max_bitrate &&
+	    obs_data_get_int(settings, "bitrate") > max_bitrate) {
+		obs_data_set_int(settings, "bitrate", max_bitrate);
+		obs_data_set_int(settings, "buffer_size", max_bitrate);
 	}
 
 	item = json_object_get(recommended, "bframes");
@@ -730,15 +756,57 @@ static void rtmp_common_get_supported_resolutions(
 	void *data, struct obs_service_resolution **resolutions, size_t *count)
 {
 	struct rtmp_common *service = data;
-	*count = service->supported_resolutions_count;
-	*resolutions = bmemdup(service->supported_resolutions,
-			       *count * sizeof(struct obs_service_resolution));
+
+	if (service->supported_resolutions_count) {
+		*count = service->supported_resolutions_count;
+		*resolutions =
+			bmemdup(service->supported_resolutions,
+				*count * sizeof(struct obs_service_resolution));
+	} else {
+		*count = 0;
+		*resolutions = NULL;
+	}
 }
 
 static void rtmp_common_get_max_fps(void *data, int *fps)
 {
 	struct rtmp_common *service = data;
 	*fps = service->max_fps;
+}
+
+static int get_bitrate_matrix_max(json_t *array)
+{
+	size_t index;
+	json_t *item;
+
+	struct obs_video_info ovi;
+	if (!obs_get_video_info(&ovi))
+		return 0;
+
+	double cur_fps = (double)ovi.fps_num / (double)ovi.fps_den;
+
+	json_array_foreach (array, index, item) {
+		if (!json_is_object(item))
+			continue;
+
+		const char *res = get_string_val(item, "res");
+		double fps = (double)get_int_val(item, "fps") + 0.0000001;
+		int bitrate = get_int_val(item, "max bitrate");
+
+		if (!res)
+			continue;
+
+		int cx, cy;
+		int c = sscanf(res, "%dx%d", &cx, &cy);
+		if (c != 2)
+			continue;
+
+		if ((int)ovi.output_width == cx &&
+		    (int)ovi.output_height == cy && cur_fps <= fps)
+			return bitrate;
+	}
+
+	return 0;
 }
 
 static void rtmp_common_get_max_bitrate(void *data, int *video_bitrate,
@@ -768,13 +836,67 @@ static void rtmp_common_get_max_bitrate(void *data, int *video_bitrate,
 	}
 
 	if (video_bitrate) {
-		item = json_object_get(recommended, "max video bitrate");
-		if (json_is_integer(item))
-			*video_bitrate = (int)json_integer_value(item);
+		int bitrate = 0;
+		item = json_object_get(recommended, "bitrate matrix");
+		if (json_is_array(item)) {
+			bitrate = get_bitrate_matrix_max(item);
+		}
+		if (!bitrate) {
+			item = json_object_get(recommended,
+					       "max video bitrate");
+			if (json_is_integer(item))
+				bitrate = (int)json_integer_value(item);
+		}
+
+		*video_bitrate = bitrate;
 	}
 
 fail:
 	json_decref(root);
+}
+
+static const char **rtmp_common_get_supported_video_codecs(void *data)
+{
+	struct rtmp_common *service = data;
+
+	if (service->video_codecs)
+		return (const char **)service->video_codecs;
+
+	struct dstr codecs = {0};
+	json_t *root = open_services_file();
+	if (!root)
+		return NULL;
+
+	json_t *json_service = find_service(root, service->service, NULL);
+	if (!json_service) {
+		goto fail;
+	}
+
+	json_t *json_video_codecs =
+		json_object_get(json_service, "supported video codecs");
+	if (json_is_array(json_video_codecs)) {
+		size_t index;
+		json_t *item;
+
+		json_array_foreach (json_video_codecs, index, item) {
+			char codec[16];
+
+			snprintf(codec, sizeof(codec), "%s",
+				 json_string_value(item));
+			if (codecs.len)
+				dstr_cat(&codecs, ";");
+			dstr_cat(&codecs, codec);
+		}
+	} else {
+		dstr_cat(&codecs, "h264;");
+	}
+
+	service->video_codecs = strlist_split(codecs.array, ';', false);
+	dstr_free(&codecs);
+
+fail:
+	json_decref(root);
+	return (const char **)service->video_codecs;
 }
 
 static const char *rtmp_common_username(void *data)
@@ -819,4 +941,5 @@ struct obs_service_info rtmp_common_service = {
 	.get_supported_resolutions = rtmp_common_get_supported_resolutions,
 	.get_max_fps = rtmp_common_get_max_fps,
 	.get_max_bitrate = rtmp_common_get_max_bitrate,
+	.get_supported_video_codecs = rtmp_common_get_supported_video_codecs,
 };

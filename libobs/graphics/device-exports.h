@@ -37,6 +37,8 @@ EXPORT void *device_get_device_obj(gs_device_t *device);
 EXPORT gs_swapchain_t *device_swapchain_create(gs_device_t *device,
 					       const struct gs_init_data *data);
 EXPORT void device_resize(gs_device_t *device, uint32_t x, uint32_t y);
+EXPORT enum gs_color_space device_get_color_space(gs_device_t *device);
+EXPORT void device_update_color_space(gs_device_t *device);
 EXPORT void device_get_size(const gs_device_t *device, uint32_t *x,
 			    uint32_t *y);
 EXPORT uint32_t device_get_width(const gs_device_t *device);
@@ -104,6 +106,9 @@ EXPORT gs_texture_t *device_get_render_target(const gs_device_t *device);
 EXPORT gs_zstencil_t *device_get_zstencil_target(const gs_device_t *device);
 EXPORT void device_set_render_target(gs_device_t *device, gs_texture_t *tex,
 				     gs_zstencil_t *zstencil);
+EXPORT void device_set_render_target_with_color_space(
+	gs_device_t *device, gs_texture_t *tex, gs_zstencil_t *zstencil,
+	enum gs_color_space space);
 EXPORT void device_set_cube_render_target(gs_device_t *device,
 					  gs_texture_t *cubetex, int side,
 					  gs_zstencil_t *zstencil);
@@ -128,6 +133,7 @@ EXPORT void device_load_swapchain(gs_device_t *device,
 EXPORT void device_clear(gs_device_t *device, uint32_t clear_flags,
 			 const struct vec4 *color, float depth,
 			 uint8_t stencil);
+EXPORT bool device_is_present_ready(gs_device_t *device);
 EXPORT void device_present(gs_device_t *device);
 EXPORT void device_flush(gs_device_t *device);
 EXPORT void device_set_cull_mode(gs_device_t *device, enum gs_cull_mode mode);
@@ -145,6 +151,8 @@ EXPORT void device_blend_function_separate(gs_device_t *device,
 					   enum gs_blend_type dest_c,
 					   enum gs_blend_type src_a,
 					   enum gs_blend_type dest_a);
+EXPORT void device_blend_op(gs_device_t *device, enum gs_blend_op_type op);
+
 EXPORT void device_depth_function(gs_device_t *device, enum gs_depth_test test);
 EXPORT void device_stencil_function(gs_device_t *device,
 				    enum gs_stencil_side side,
@@ -177,6 +185,16 @@ EXPORT gs_texture_t *device_texture_create_from_dmabuf(
 	uint32_t drm_format, enum gs_color_format color_format,
 	uint32_t n_planes, const int *fds, const uint32_t *strides,
 	const uint32_t *offsets, const uint64_t *modifiers);
+
+EXPORT bool
+device_query_dmabuf_capabilities(gs_device_t *device,
+				 enum gs_dmabuf_flags *gs_dmabuf_flags,
+				 uint32_t **drm_formats, size_t *n_formats);
+
+EXPORT bool device_query_dmabuf_modifiers_for_format(gs_device_t *device,
+						     uint32_t drm_format,
+						     uint64_t **modifiers,
+						     size_t *n_modifiers);
 
 #endif
 

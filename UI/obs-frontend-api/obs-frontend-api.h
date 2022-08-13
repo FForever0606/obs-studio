@@ -55,6 +55,11 @@ enum obs_frontend_event {
 	OBS_FRONTEND_EVENT_VIRTUALCAM_STOPPED,
 
 	OBS_FRONTEND_EVENT_TBAR_VALUE_CHANGED,
+	OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING,
+	OBS_FRONTEND_EVENT_PROFILE_CHANGING,
+	OBS_FRONTEND_EVENT_SCRIPTING_SHUTDOWN,
+	OBS_FRONTEND_EVENT_PROFILE_RENAMED,
+	OBS_FRONTEND_EVENT_SCENE_COLLECTION_RENAMED,
 };
 
 /* ------------------------------------------------------------------------- */
@@ -117,7 +122,11 @@ EXPORT bool obs_frontend_add_scene_collection(const char *name);
 
 EXPORT char **obs_frontend_get_profiles(void);
 EXPORT char *obs_frontend_get_current_profile(void);
+EXPORT char *obs_frontend_get_current_profile_path(void);
 EXPORT void obs_frontend_set_current_profile(const char *profile);
+EXPORT void obs_frontend_create_profile(const char *name);
+EXPORT void obs_frontend_duplicate_profile(const char *name);
+EXPORT void obs_frontend_delete_profile(const char *profile);
 
 typedef void (*obs_frontend_cb)(void *private_data);
 
@@ -168,6 +177,7 @@ EXPORT void obs_frontend_recording_stop(void);
 EXPORT bool obs_frontend_recording_active(void);
 EXPORT void obs_frontend_recording_pause(bool pause);
 EXPORT bool obs_frontend_recording_paused(void);
+EXPORT bool obs_frontend_recording_split_file(void);
 
 EXPORT void obs_frontend_replay_buffer_start(void);
 EXPORT void obs_frontend_replay_buffer_save(void);
@@ -210,6 +220,13 @@ EXPORT void obs_frontend_stop_virtualcam(void);
 EXPORT bool obs_frontend_virtualcam_active(void);
 
 EXPORT void obs_frontend_reset_video(void);
+
+EXPORT void obs_frontend_open_source_properties(obs_source_t *source);
+EXPORT void obs_frontend_open_source_filters(obs_source_t *source);
+EXPORT void obs_frontend_open_source_interaction(obs_source_t *source);
+
+EXPORT char *obs_frontend_get_current_record_output_path(void);
+EXPORT const char *obs_frontend_get_locale_string(const char *string);
 
 /* ------------------------------------------------------------------------- */
 
