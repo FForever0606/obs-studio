@@ -133,7 +133,7 @@ void OBSBasicVCamConfig::Save()
 		UpdateOutputSource();
 }
 
-static void SaveCallback(obs_data_t *data, bool saving, void *)
+void OBSBasicVCamConfig::SaveData(obs_data_t *data, bool saving)
 {
 	if (saving) {
 		OBSDataAutoRelease obj = obs_data_create();
@@ -180,39 +180,54 @@ static void EventCallback(enum obs_frontend_event event, void *)
 	OBSBasicVCamConfig::UpdateOutputSource();
 }
 
+static auto staticConfig = VCamConfig{};
+
 void OBSBasicVCamConfig::Init()
 {
 	if (vCamConfig)
 		return;
 
-	vCamConfig = new VCamConfig;
+	vCamConfig = &staticConfig;
 
-	obs_frontend_add_save_callback(SaveCallback, nullptr);
 	obs_frontend_add_event_callback(EventCallback, nullptr);
 }
 
 static obs_view_t *view = nullptr;
 static video_t *video = nullptr;
 
+static obs_scene_t *sourceScene = nullptr;
+static obs_sceneitem_t *sourceSceneItem = nullptr;
+
 video_t *OBSBasicVCamConfig::StartVideo()
 {
-	if (!video) {
+	if (!view)
 		view = obs_view_create();
-		video = obs_view_add(view);
-	}
+
 	UpdateOutputSource();
+
+	if (!video)
+		video = obs_view_add(view);
 	return video;
 }
 
 void OBSBasicVCamConfig::StopVideo()
 {
-	if (view) {
-		obs_view_remove(view);
-		obs_view_set_source(view, 0, nullptr);
-		obs_view_destroy(view);
-		view = nullptr;
-	}
+	obs_view_remove(view);
+	obs_view_set_source(view, 0, nullptr);
 	video = nullptr;
+
+	if (sourceScene) {
+		obs_scene_release(sourceScene);
+		sourceScene = nullptr;
+		sourceSceneItem = nullptr;
+	}
+}
+
+void OBSBasicVCamConfig::DestroyView()
+{
+	StopVideo();
+	obs_view_destroy(view);
+	view = nullptr;
 }
 
 void OBSBasicVCamConfig::UpdateOutputSource()
@@ -241,7 +256,38 @@ void OBSBasicVCamConfig::UpdateOutputSource()
 		break;
 
 	case VCamOutputType::Source:
-		source = obs_get_source_by_name(vCamConfig->source.c_str());
+		auto rawSource =
+			obs_get_source_by_name(vCamConfig->source.c_str());
+		if (!rawSource)
+			break;
+
+		// Use a scene transform to fit the source size to the canvas
+		if (!sourceScene)
+			sourceScene = obs_scene_create_private(nullptr);
+		source = obs_source_get_ref(obs_scene_get_source(sourceScene));
+
+		if (sourceSceneItem) {
+			if (obs_sceneitem_get_source(sourceSceneItem) !=
+			    rawSource) {
+				obs_sceneitem_remove(sourceSceneItem);
+				sourceSceneItem = nullptr;
+			}
+		}
+		if (!sourceSceneItem) {
+			sourceSceneItem = obs_scene_add(sourceScene, rawSource);
+			obs_source_release(rawSource);
+
+			obs_sceneitem_set_bounds_type(sourceSceneItem,
+						      OBS_BOUNDS_SCALE_INNER);
+			obs_sceneitem_set_bounds_alignment(sourceSceneItem,
+							   OBS_ALIGN_CENTER);
+
+			const struct vec2 size = {
+				(float)obs_source_get_width(source),
+				(float)obs_source_get_height(source),
+			};
+			obs_sceneitem_set_bounds(sourceSceneItem, &size);
+		}
 		break;
 	}
 
